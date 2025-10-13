@@ -120,3 +120,77 @@ module LED_control(clk, rst, bin, seg_data, seg_sel, led_signal);
         end
     end
 endmodule
+
+
+//////////////////////////////////##아래는 tb####////////
+
+
+
+
+`timescale 1ns / 1ps
+
+module tb_LED_control;
+
+    reg clk;
+    reg rst;
+    reg [7:0] bin;
+
+    wire [7:0] seg_data;
+    wire [7:0] seg_sel;
+    wire led_signal;
+
+    LED_control dut (
+        .clk(clk),
+        .rst(rst),
+        .bin(bin),
+        .seg_data(seg_data),
+        .seg_sel(seg_sel),
+        .led_signal(led_signal)
+    );
+
+    initial begin
+        clk = 0;
+    end
+    always #500 clk = ~clk;
+
+    initial begin
+        rst = 1;
+        bin = 0;
+        #2000;
+        rst = 0;
+        
+        $monitor("%8.1f   | %-7s | %-14d | %b", $time/1000.0, get_brightness_str(bin), bin, led_signal);
+
+        bin <= 8'd0;
+        #512000;
+
+        bin <= 8'd63;
+        #512000;
+
+        bin <= 8'd127;
+        #512000;
+
+        bin <= 8'd191;
+        #512000;
+
+        bin <= 8'd255;
+        #512000;
+
+        $finish;
+    end
+
+    function [55:0] get_brightness_str;
+        input [7:0] ref_val;
+        begin
+            case(ref_val)
+                8'd0:   get_brightness_str = "0%";
+                8'd63:  get_brightness_str = "25%";
+                8'd127: get_brightness_str = "50%";
+                8'd191: get_brightness_str = "75%";
+                8'd255: get_brightness_str = "100%";
+                default: get_brightness_str = "N/A";
+            endcase
+        end
+    endfunction
+
+endmodule
