@@ -1,0 +1,125 @@
+module LED_control(
+    input clk,
+    input rst,
+    input [7:0] bin,
+    output [7:0] seg_data,
+    output [7:0] seg_sel,
+    output led_signal
+);
+
+    wire [7:0] cnt;
+    wire pwm_clk = clk;
+
+    counter8 c1(pwm_clk, rst, cnt);
+
+    seg7_controller s1(clk, rst, bin, seg_data, seg_sel);
+
+    reg pwm_reg;
+    assign led_signal = pwm_reg;
+
+    always @(posedge pwm_clk or posedge rst) begin
+        if (rst) begin
+            pwm_reg <= 1'b0;
+        end
+        else begin
+            if (cnt < bin) begin
+                pwm_reg <= 1'b1;
+            end
+            else begin
+                pwm_reg <= 1'b0;
+            end
+        end
+    end
+endmodule
+
+
+module counter8(clk, rst, cnt);
+    input clk, rst;
+    output reg [7:0] cnt;
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            cnt <= 8'd0;
+        end
+        else begin
+            cnt <= cnt + 1;
+        end
+    end
+endmodule
+
+
+module bin2bcd(bin, bcd_out);
+    input [7:0] bin;
+    output reg [11:0] bcd_out;
+
+    reg [19:0] temp_reg;
+    integer i;
+
+    always @(*) begin
+        temp_reg = {12'd0, bin};
+
+        for (i = 0; i < 8; i = i + 1) begin
+            if (temp_reg[11:8] >= 5) temp_reg[11:8] = temp_reg[11:8] + 3;
+            if (temp_reg[15:12] >= 5) temp_reg[15:12] = temp_reg[15:12] + 3;
+            if (temp_reg[19:16] >= 5) temp_reg[19:16] = temp_reg[19:16] + 3;
+
+            temp_reg = temp_reg << 1;
+        end
+        bcd_out = temp_reg[19:8];
+    end
+endmodule
+
+
+module seg7_controller(clk, rst, bin, seg_data, seg_sel);
+    input clk;
+    input rst;
+    input [7:0] bin;
+
+    output reg [7:0] seg_data;
+    output reg [7:0] seg_sel;
+
+    wire [11:0] bcd;
+    reg [3:0] display_bcd;
+    
+    bin2bcd b1(bin, bcd);
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            seg_sel <= 8'b11111110;
+        
+        end
+        else begin
+            case (seg_sel)
+              8'b11111110: seg_sel <= 8'b11111101;
+              8'b11111101: seg_sel <= 8'b11111011;
+              8'b11111011: seg_sel <= 8'b11111110;
+              default:     seg_sel <= 8'b11111110;
+            endcase
+        end
+    end
+
+    always @(*) begin
+        case(seg_sel)
+            8'b11111110: display_bcd = bcd[3:0];
+            8'b11111101: display_bcd = bcd[7:4];
+            8'b11111011: display_bcd = bcd[11:8];
+            default:     display_bcd = 4'b0;
+        endcase
+    end
+
+    always @(*) begin
+        case (display_bcd)
+            4'h0: seg_data = 8'b0011_1111;
+            4'h1: seg_data = 8'b0000_0110;
+            4'h2: seg_data = 8'b0101_1011;
+            4'h3: seg_data = 8'b0100_1111;
+            4'h4: seg_data = 8'b0110_0110;
+            4'h5: seg_data = 8'b0110_1101;
+            4'h6: seg_data = 8'b0111_1101;
+            4'h7: seg_data = 8'b0000_0111;
+            4'h8: seg_data = 8'b0111_1111;
+            4'h9: seg_data = 8'b0110_1111;
+            default: seg_data = 8'b0000_0000;
+        endcase
+    end
+endmodule
