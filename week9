@@ -1,0 +1,247 @@
+module LCD_cursor(rst, clk, LCD_E, LCD_RS, LCD_RW, LCD_DATA, LED_out, number_btn, control_btn);
+
+input rst, clk;
+input [9:0] number_btn;
+input [1:0] control_btn;
+
+wire [9:0] number_btn_t;
+wire [1:0] control_btn_t;
+
+oneshot_universal #(.WIDTH(12)) O1(clk, rst, {number_btn[9:0],control_btn[1:0]}, {number_btn_t[9:0],control_btn_t[1:0]});
+
+output LCD_E, LCD_RS, LCD_RW;
+output reg [7:0] LCD_DATA;
+output reg [7:0] LED_out;
+
+wire LCD_E;
+reg LCD_RS, LCD_RW;
+
+reg [7:0] cnt;
+
+reg [4:0] state;
+parameter DELAY = 5'b00000,
+          FUNCTION_SET = 5'b00001,
+          DISP_ONOFF = 5'b00010,
+          ENTRY_MODE = 5'b00011,
+          SET_ADDRESS = 5'b00100,
+          WRITE_C1 = 5'b00101,
+          WRITE_C2 = 5'b00110,
+          WRITE_C3 = 5'b00111,
+          WRITE_C4 = 5'b01000,
+          WRITE_C5 = 5'b01001,
+          WRITE_C6 = 5'b01010,
+          WRITE_C7 = 5'b01011,
+          WRITE_C8 = 5'b01100,
+          WRITE_C9 = 5'b01101,
+          WRITE_C10 = 5'b01110,
+          WRITE_C11 = 5'b01111,
+          WRITE_C12 = 5'b10000,
+          WRITE_C13 = 5'b10001,
+          WRITE_C14 = 5'b10010,
+          WRITE_C15 = 5'b10011,
+          DELAY_T = 5'b10100,
+          WRITE = 5'b10101,
+          CURSOR = 5'b10110;
+
+always @(posedge clk or negedge rst)
+begin
+    if(!rst) begin
+        state <= DELAY;
+        LED_out <= 8'b0000_0000;
+    end
+    else begin
+        case(state)
+            DELAY : begin
+                if(cnt == 70) state <= FUNCTION_SET;
+                LED_out <= 8'b1000_0000;
+            end
+            FUNCTION_SET : begin
+                if(cnt == 30) state <= DISP_ONOFF;
+                LED_out <= 8'b0100_0000;
+            end
+            DISP_ONOFF : begin
+                if(cnt == 30) state <= ENTRY_MODE;
+                LED_out <= 8'b0010_0001;
+            end
+            ENTRY_MODE : begin
+                if(cnt == 30) state <= SET_ADDRESS;
+                LED_out <= 8'b0001_0000;
+            end
+            SET_ADDRESS : begin
+                if(cnt == 100) state <= WRITE_C1;
+                LED_out <= 8'b0000_1000;
+            end
+            
+            WRITE_C1: if(cnt == 30) state <= WRITE_C2; else LED_out <= 8'hFF;
+            WRITE_C2: if(cnt == 30) state <= WRITE_C3; else LED_out <= 8'hFE;
+            WRITE_C3: if(cnt == 30) state <= WRITE_C4; else LED_out <= 8'hFD;
+            WRITE_C4: if(cnt == 30) state <= WRITE_C5; else LED_out <= 8'hFC;
+            WRITE_C5: if(cnt == 30) state <= WRITE_C6; else LED_out <= 8'hFB;
+            WRITE_C6: if(cnt == 30) state <= WRITE_C7; else LED_out <= 8'hFA;
+            WRITE_C7: if(cnt == 30) state <= WRITE_C8; else LED_out <= 8'hF9;
+            WRITE_C8: if(cnt == 30) state <= WRITE_C9; else LED_out <= 8'hF8;
+            WRITE_C9: if(cnt == 30) state <= WRITE_C10; else LED_out <= 8'hF7;
+            WRITE_C10: if(cnt == 30) state <= WRITE_C11; else LED_out <= 8'hF6;
+            WRITE_C11: if(cnt == 30) state <= WRITE_C12; else LED_out <= 8'hF5;
+            WRITE_C12: if(cnt == 30) state <= WRITE_C13; else LED_out <= 8'hF4;
+            WRITE_C13: if(cnt == 30) state <= WRITE_C14; else LED_out <= 8'hF3;
+            WRITE_C14: if(cnt == 30) state <= WRITE_C15; else LED_out <= 8'hF2;
+            WRITE_C15: if(cnt == 30) state <= DELAY_T; else LED_out <= 8'hF1;
+
+            DELAY_T : begin
+                state <= number_btn_t ? WRITE : (control_btn_t ? CURSOR : DELAY_T);
+                LED_out <= 8'b0000_0100;
+            end
+            WRITE : begin
+                if(cnt == 30) state <= DELAY_T;
+                LED_out <= 8'b0000_0010;
+            end
+            CURSOR : begin
+                if(cnt == 30) state <= DELAY_T;
+                LED_out <= 8'b0000_0001;
+            end
+        endcase
+    end
+end
+
+always @(posedge clk or negedge rst)
+begin
+    if(!rst)
+        cnt <= 8'b0000_0000;
+    else
+    begin
+        case(state)
+            DELAY :
+                if(cnt >= 70) cnt <= 0;
+                else cnt <= cnt + 1;
+            FUNCTION_SET :
+                if(cnt >= 30) cnt <= 0;
+                else cnt <= cnt + 1;
+            DISP_ONOFF :
+                if(cnt >= 30) cnt <= 0;
+                else cnt <= cnt + 1;
+            ENTRY_MODE :
+                if(cnt >= 30) cnt <= 0;
+                else cnt <= cnt + 1;
+            SET_ADDRESS :
+                if(cnt >= 100) cnt <= 0;
+                else cnt <= cnt + 1;
+            
+            WRITE_C1: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C2: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C3: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C4: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C5: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C6: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C7: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C8: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C9: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C10: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C11: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C12: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C13: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C14: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            WRITE_C15: if(cnt >= 30) cnt <= 0; else cnt <= cnt + 1;
+            
+            DELAY_T :
+                cnt <= 0;
+            WRITE :
+                if(cnt >= 30) cnt <= 0;
+                else cnt <= cnt + 1;
+            CURSOR :
+                if(cnt >= 30) cnt <= 0;
+                else cnt <= cnt + 1;
+        endcase
+    end
+end
+
+always @(posedge clk or negedge rst)
+begin
+    if(!rst)
+        {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0000_0001;
+    else
+    begin
+        case(state)
+            FUNCTION_SET :
+                {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0011_1000;
+            DISP_ONOFF :
+                {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0000_1111;
+            ENTRY_MODE :
+                {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0000_0110;
+            SET_ADDRESS :
+                {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0000_0010;
+
+            WRITE_C1: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0010;
+            WRITE_C2: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0000;
+            WRITE_C3: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0010;
+            WRITE_C4: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0010;
+            WRITE_C5: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0100;
+            WRITE_C6: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0100;
+            WRITE_C7: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0000;
+            WRITE_C8: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0001;
+            WRITE_C9: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0000;
+            WRITE_C10: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0010;
+            WRITE_C11: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0010_0000;
+            WRITE_C12: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0001;
+            WRITE_C13: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0001;
+            WRITE_C14: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0000;
+            WRITE_C15: {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0011;
+            
+            DELAY_T :
+                {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0000_1111;
+            WRITE : begin
+                if(cnt == 20) begin
+                    case(number_btn)
+                        10'b1000_0000_00 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0001;
+                        10'b0100_0000_00 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0010;
+                        10'b0010_0000_00 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0011;
+                        10'b0001_0000_00 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0100;
+                        10'b0000_1000_00 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0101;
+                        10'b0000_0100_00 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0110;
+                        10'b0000_0010_00 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0111;
+                        10'b0000_0001_00 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_1000;
+                        10'b0000_0000_10 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_1001;
+                        10'b0000_0000_01 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b1_0_0011_0000;
+                    endcase
+                end
+                else {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0000_1111;
+            end
+            CURSOR : begin
+                if(cnt == 20) begin
+                    case(control_btn)
+                        2'b10 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0001_0000;
+                        2'b01 : {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0001_0100;
+                    endcase
+                end
+                else {LCD_RS, LCD_RW, LCD_DATA} <= 10'b0_0_0000_1111;
+            end
+        endcase
+    end
+end
+
+assign LCD_E = clk;
+/////////////////////// 아래는 원샷
+module oneshot_universal(clk, rst, btn, btn_trig);
+
+parameter WIDTH = 1;
+input clk, rst;
+input [WIDTH-1:0] btn;
+reg [WIDTH-1:0] btn_reg;
+output reg [WIDTH-1:0] btn_trig;
+
+always @(negedge rst or posedge clk) begin
+    if(!rst) begin
+        btn_reg <= {WIDTH{1'b0}};
+        btn_trig <= {WIDTH{1'b0}};
+    end
+    else begin
+        btn_reg <= btn;
+        btn_trig <= btn & ~btn_reg;
+    end
+end
+
+endmodule
+
+
+
+endmodule
