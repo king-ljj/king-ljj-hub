@@ -1,0 +1,338 @@
+module DAC_with_Display(
+    input clk,
+    input rst,
+    input [11:0] btn,
+    input add_sel,
+    output reg dac_csn,
+    output reg dac_ldacn,
+    output reg dac_wrn,
+    output reg dac_a_b,
+    output reg [7:0] dac_d,
+    output reg [7:0] led_out,
+
+    output [7:0] seg_data,
+    output [7:0] seg_sel,
+
+    output [7:0] lcd_d,
+    output lcd_rs,
+    output lcd_rw,
+    output lcd_e
+);
+
+reg [7:0] dac_d_temp;
+reg [7:0] cnt;
+wire [11:0] btn_t;
+
+reg [1:0] state;
+
+parameter DELAY = 2'b00,
+          SET_WRN = 2'b01,
+          UP_DATA = 2'b10;
+
+oneshot_universal #(.WIDTH(12)) O1(clk, rst, {btn[11:0]}, {btn_t[11:0]});
+
+FND_Controller u_fnd (
+    .clk(clk),
+    .rst(rst),
+    .data_in(dac_d_temp),
+    .seg_data(seg_data),
+    .seg_sel(seg_sel)
+);
+
+LCD_Controller u_lcd (
+    .clk(clk),
+    .rst(rst),
+    .data_in(dac_d_temp),
+    .lcd_d(lcd_d),
+    .lcd_rs(lcd_rs),
+    .lcd_rw(lcd_rw),
+    .lcd_e(lcd_e)
+);
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        state <= DELAY;
+    end
+    else begin
+        case(state)
+            DELAY : if(cnt == 200) state <= SET_WRN;
+            SET_WRN : if(cnt == 50) state <= UP_DATA;
+            UP_DATA : if(cnt == 30) state <= DELAY;
+        endcase
+    end
+end
+
+always @(posedge clk or negedge rst) begin
+    if(!rst)
+        cnt <= 8'b0000_0000;
+    else begin
+        case(state)
+            DELAY :
+                if(cnt >= 200) cnt <= 0;
+                else cnt <= cnt + 1;
+            SET_WRN :
+                if(cnt >= 50) cnt <= 0;
+                else cnt <= cnt + 1;
+            UP_DATA :
+                if(cnt >= 30) cnt <= 0;
+                else cnt <= cnt + 1;
+        endcase
+    end
+end
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        dac_wrn <= 1;
+    end
+    else begin
+        case(state)
+            DELAY :
+                dac_wrn <= 1;
+            SET_WRN :
+                dac_wrn <= 0;
+            UP_DATA :
+                dac_d <= dac_d_temp;
+        endcase
+    end
+end
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        dac_d_temp <= 8'b0000_0000;
+        led_out <= 8'b0101_0101;
+    end
+    else begin
+        if(btn_t[0])      dac_d_temp <= dac_d_temp - 8'd1;
+        else if(btn_t[2]) dac_d_temp <= dac_d_temp + 8'd1;
+        else if(btn_t[3]) dac_d_temp <= dac_d_temp - 8'd2;
+        else if(btn_t[5]) dac_d_temp <= dac_d_temp + 8'd2;
+        else if(btn_t[6]) dac_d_temp <= dac_d_temp - 8'd8;
+        else if(btn_t[8]) dac_d_temp <= dac_d_temp + 8'd8;
+
+        led_out <= dac_d_temp;
+    end
+end
+
+always @(posedge clk) begin
+    dac_csn <= 0;
+    dac_ldacn <= 0;
+    dac_a_b <= add_sel;
+end
+
+endmodule
+////////////////
+
+module oneshot_universal #(
+    parameter WIDTH = 1
+) (
+    input clk,
+    input rst,
+    input [WIDTH-1:0] btn,
+    output reg [WIDTH-1:0] btn_t
+);
+
+    reg [WIDTH-1:0] btn_reg;
+
+    always @(posedge clk or negedge rst) begin
+        if (!rst) begin
+            btn_reg <= 0;
+            btn_t <= 0;
+        end
+        else begin
+            btn_reg <= btn;
+            btn_t <= btn & ~btn_reg;
+        end
+    end
+
+endmodule
+///////////
+
+module FND_Controller (
+    input clk,
+    input rst,
+    input [7:0] data_in,
+    output reg [7:0] seg_data,
+    output reg [7:0] seg_sel
+);
+
+    reg [3:0] ones, tens, hundreds;
+    reg [3:0] digit_data;
+    reg [19:0] clk_div;
+    reg [1:0] scan_cnt;
+    
+    always @(*) begin
+        hundreds = data_in / 100;
+        tens = (data_in % 100) / 10;
+        ones = data_in % 10;
+    end
+
+    always @(posedge clk or negedge rst) begin
+        if (!rst) begin
+            clk_div <= 0;
+            scan_cnt <= 0;
+        end
+        else begin
+            if (clk_div == 20'd99999) begin
+                clk_div <= 0;
+                scan_cnt <= scan_cnt + 1;
+            end
+            else begin
+                clk_div <= clk_div + 1;
+            end
+        end
+    end
+
+    always @(*) begin
+        case (scan_cnt)
+            2'd0: begin
+                seg_sel = 8'b11111011;
+                digit_data = hundreds;
+            end
+            2'd1: begin
+                seg_sel = 8'b11111101;
+                digit_data = tens;
+            end
+            2'd2: begin
+                seg_sel = 8'b11111110;
+                digit_data = ones;
+            end
+            default: begin
+                seg_sel = 8'b11111111;
+                digit_data = 4'hF;
+            end
+        endcase
+    end
+
+    always @(*) begin
+        case (digit_data)
+            4'd0: seg_data = 8'hC0;
+            4'd1: seg_data = 8'hF9;
+            4'd2: seg_data = 8'hA4;
+            4'd3: seg_data = 8'hB0;
+            4'd4: seg_data = 8'h99;
+            4'd5: seg_data = 8'h92;
+            4'd6: seg_data = 8'h82;
+            4'd7: seg_data = 8'hF8;
+            4'd8: seg_data = 8'h80;
+            4'd9: seg_data = 8'h90;
+            default: seg_data = 8'hFF;
+        endcase
+    end
+
+endmodule
+///////////
+
+module LCD_Controller (
+    input clk,
+    input rst,
+    input [7:0] data_in,
+    output reg [7:0] lcd_d,
+    output reg lcd_rs,
+    output reg lcd_rw,
+    output reg lcd_e
+);
+
+    reg [23:0] clk_div;
+    reg clk_1ms;
+
+    always @(posedge clk or negedge rst) begin
+        if (!rst) begin
+            clk_div <= 0;
+            clk_1ms <= 0;
+        end
+        else begin
+            if (clk_div == 24'd49999) begin
+                clk_div <= 0;
+                clk_1ms <= 1;
+            end
+            else begin
+                clk_div <= clk_div + 1;
+                clk_1ms <= 0;
+            end
+        end
+    end
+
+    reg [6:0] state;
+    reg [7:0] cmd;
+    reg [7:0] data;
+    reg [3:0] ones, tens, hundreds;
+    reg [7:0] char_ones, char_tens, char_hundreds;
+
+    localparam S_WAIT = 0,
+               S_INIT1 = 1, S_INIT2 = 2, S_INIT3 = 3, S_INIT4 = 4,
+               S_INIT5 = 5, S_INIT6 = 6, S_INIT7 = 7, S_INIT8 = 8,
+               S_LINE1 = 9,
+               S_CHAR_D = 10, S_CHAR_A = 11, S_CHAR_C = 12, S_CHAR_COL = 13,
+               S_LINE2 = 14,
+               S_BCD_CONV = 15,
+               S_CHAR_H = 16, S_CHAR_T = 17, S_CHAR_O = 18,
+               S_E_PULSE_CMD = 19, S_E_PULSE_DATA = 20;
+
+    always @(*) begin
+        hundreds = data_in / 100;
+        tens = (data_in % 100) / 10;
+        ones = data_in % 10;
+        char_hundreds = hundreds + 8'h30;
+        char_tens = tens + 8'h30;
+        char_ones = ones + 8'h30;
+    end
+
+    always @(posedge clk_1ms or negedge rst) begin
+        if (!rst) begin
+            state <= S_INIT1;
+            lcd_d <= 8'h00;
+            lcd_rs <= 0;
+            lcd_rw <= 0;
+            lcd_e <= 0;
+            cmd <= 8'h00;
+            data <= 8'h00;
+        end
+        else begin
+            lcd_e <= 0;
+            case (state)
+                S_INIT1: begin state <= S_E_PULSE_CMD; cmd <= 8'h38; end
+                S_INIT2: begin state <= S_E_PULSE_CMD; cmd <= 8'h38; end
+                S_INIT3: begin state <= S_E_PULSE_CMD; cmd <= 8'h38; end
+                S_INIT4: begin state <= S_E_PULSE_CMD; cmd <= 8'h0C; end
+                S_INIT5: begin state <= S_E_PULSE_CMD; cmd <= 8'h01; end
+                S_INIT6: begin state <= S_E_PULSE_CMD; cmd <= 8'h06; end
+                S_INIT7: begin state <= S_E_PULSE_CMD; cmd <= 8'h02; end
+                S_INIT8: begin state <= S_LINE1; end
+
+                S_LINE1: begin state <= S_E_PULSE_CMD; cmd <= 8'h80; end 
+                S_CHAR_D: begin state <= S_E_PULSE_DATA; data <= 8'h44; end
+                S_CHAR_A: begin state <= S_E_PULSE_DATA; data <= 8'h41; end
+                S_CHAR_C: begin state <= S_E_PULSE_DATA; data <= 8'h43; end
+                S_CHAR_COL: begin state <= S_E_PULSE_DATA; data <= 8'h3A; end
+
+                S_LINE2: begin state <= S_E_PULSE_CMD; cmd <= 8'hC0; end 
+                S_BCD_CONV: begin state <= S_CHAR_H; end 
+                S_CHAR_H: begin state <= S_E_PULSE_DATA; data <= (hundreds == 0) ? 8'h20 : char_hundreds; end
+                S_CHAR_T: begin state <= S_E_PULSE_DATA; data <= (hundreds == 0 && tens == 0) ? 8'h20 : char_tens; end
+                S_CHAR_O: begin state <= S_E_PULSE_DATA; data <= char_ones; end 
+                
+                S_WAIT: begin state <= S_LINE2; end
+
+                S_E_PULSE_CMD: begin
+                    lcd_d <= cmd;
+                    lcd_rs <= 0;
+                    lcd_rw <= 0;
+                    lcd_e <= 1;
+                    if (state == S_INIT8) state <= S_LINE1;
+                    else if (state == S_CHAR_COL) state <= S_LINE2;
+                    else if (state == S_CHAR_O) state <= S_WAIT;
+                    else state <= state + 1;
+                end
+                S_E_PULSE_DATA: begin
+                    lcd_d <= data;
+                    lcd_rs <= 1;
+                    lcd_rw <= 0;
+                    lcd_e <= 1;
+                    if (state == S_CHAR_O) state <= S_WAIT; 
+                    else state <= state + 1;
+                end
+            endcase
+        end
+    end
+
+endmodule
