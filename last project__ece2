@@ -730,8 +730,3 @@ module seg_decoder(bcd, seg_data);
 endmodule
 
 
-
-
-
-
-endmodule
