@@ -1,0 +1,737 @@
+//메인모듈//
+module watch(
+    input clk,             
+    input rst,             
+    input btn_mode,        
+    input btn_inc,         
+    input mode_12_24,      
+    
+    input sw_stopwatch_mode, 
+    input sw_timer_mode,     
+    input [4:0] sw_control,  
+    
+    input [8:0] btn_world,   
+
+    output reg [7:0] seg_data, 
+    output reg [7:0] seg_com,  
+    output led_pm,             
+    output reg piezo,          
+
+    output reg cled_r, 
+    output reg cled_g, 
+    output reg cled_b,
+
+    output lcd_rs, 
+    output lcd_rw, 
+    output lcd_e, 
+    output [7:0] lcd_data
+);
+
+    
+    reg [9:0] h_cnt; 
+    reg [9:0] blink_cnt;    
+    reg [3:0] h_ten, h_one, m_ten, m_one, s_ten, s_one;
+    
+    reg [3:0] world_h_ten, world_h_one;
+    reg [3:0] disp_h_ten, disp_h_one;
+    reg disp_is_pm;
+    
+    wire [7:0] seg_h_ten, seg_h_one, seg_m_ten, seg_m_one, seg_s_ten, seg_s_one;
+    reg [2:0] sel_cnt;
+    
+    parameter STATE_RUN   = 2'd0;
+    parameter STATE_SET_H = 2'd1;
+    parameter STATE_SET_M = 2'd2;
+    reg [1:0] state;
+    
+    reg btn_m_d1, btn_m_d2;
+    reg btn_i_d1, btn_i_d2;
+    wire btn_m_posedge = ~btn_m_d2 && btn_m_d1;
+    wire btn_i_posedge = ~btn_i_d2 && btn_i_d1;
+
+    reg [3:0] sw_m_ten, sw_m_one, sw_s_ten, sw_s_one, sw_ms_ten, sw_ms_one;
+    wire [7:0] seg_sw_m_ten, seg_sw_m_one, seg_sw_s_ten, seg_sw_s_one, seg_sw_ms_ten, seg_sw_ms_one;
+    reg [3:0] ms_cnt_10; 
+
+    reg [3:0] tm_m_ten, tm_m_one, tm_s_ten, tm_s_one;
+    wire [7:0] seg_tm_m_ten, seg_tm_m_one, seg_tm_s_ten, seg_tm_s_one;
+    reg [9:0] timer_1sec_cnt;
+    reg timer_running;
+    reg timer_alarm;
+
+    
+    lcd_controller u_lcd(
+        .clk(clk), 
+        .rst(rst), 
+        .btn_world(btn_world),
+        .sw_timer_mode(sw_timer_mode),          
+        .sw_stopwatch_mode(sw_stopwatch_mode), 
+        .lcd_rs(lcd_rs), 
+        .lcd_rw(lcd_rw), 
+        .lcd_e(lcd_e), 
+        .lcd_data(lcd_data)
+    );
+    
+    seg_decoder u_h_ten(disp_h_ten, seg_h_ten);
+    seg_decoder u_h_one(disp_h_one, seg_h_one);
+    seg_decoder u_m_ten(m_ten, seg_m_ten);
+    seg_decoder u_m_one(m_one, seg_m_one);
+    seg_decoder u_s_ten(s_ten, seg_s_ten);
+    seg_decoder u_s_one(s_one, seg_s_one);
+    
+    seg_decoder u_sw_m_ten(sw_m_ten, seg_sw_m_ten);
+    seg_decoder u_sw_m_one(sw_m_one, seg_sw_m_one);
+    seg_decoder u_sw_s_ten(sw_s_ten, seg_sw_s_ten);
+    seg_decoder u_sw_s_one(sw_s_one, seg_sw_s_one);
+    seg_decoder u_sw_ms_ten(sw_ms_ten, seg_sw_ms_ten);
+    seg_decoder u_sw_ms_one(sw_ms_one, seg_sw_ms_one);
+    
+    seg_decoder u_tm_m_ten(tm_m_ten, seg_tm_m_ten);
+    seg_decoder u_tm_m_one(tm_m_one, seg_tm_m_one);
+    seg_decoder u_tm_s_ten(tm_s_ten, seg_tm_s_ten);
+    seg_decoder u_tm_s_one(tm_s_one, seg_tm_s_one);
+
+    
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            btn_m_d1 <= 0; btn_m_d2 <= 0;
+            btn_i_d1 <= 0; btn_i_d2 <= 0;
+        end else begin
+            btn_m_d1 <= btn_mode; btn_m_d2 <= btn_m_d1;
+            btn_i_d1 <= btn_inc;  btn_i_d2 <= btn_i_d1;
+        end
+    end
+
+    always @(posedge clk or posedge rst) begin
+        if (rst)
+            state <= STATE_RUN;
+        else if (btn_m_posedge) begin
+            case (state)
+                STATE_RUN:   state <= STATE_SET_H;
+                STATE_SET_H: state <= STATE_SET_M;
+                STATE_SET_M: state <= STATE_RUN;
+                default:     state <= STATE_RUN;
+            endcase
+        end
+    end
+
+    
+    reg signed [5:0] time_offset;
+    reg signed [5:0] current_hour_int;
+    reg signed [5:0] target_hour_int;
+
+    always @(*) begin
+        if      (btn_world[0]) time_offset = -9;  
+        else if (btn_world[1]) time_offset = -8;  
+        else if (btn_world[2]) time_offset = -6;  
+        else if (btn_world[3]) time_offset = -2;  
+        else if (btn_world[4]) time_offset = -1;  
+        else if (btn_world[5]) time_offset = 1;   
+        else if (btn_world[6]) time_offset = -14; 
+        else if (btn_world[7]) time_offset = -17; 
+        else if (btn_world[8]) time_offset = -19; 
+        else                   time_offset = 0;   
+
+        current_hour_int = (h_ten * 10) + h_one;
+        target_hour_int = current_hour_int + time_offset;
+        
+        if (target_hour_int < 0)
+            target_hour_int = target_hour_int + 24;
+        else if (target_hour_int >= 24)
+            target_hour_int = target_hour_int - 24;
+
+        world_h_ten = target_hour_int / 10;
+        world_h_one = target_hour_int % 10;
+    end
+
+    always @(*) begin
+        disp_h_ten = world_h_ten;
+        disp_h_one = world_h_one;
+        
+        if (world_h_ten == 2 || (world_h_ten == 1 && world_h_one >= 2))
+            disp_is_pm = 1;
+        else
+            disp_is_pm = 0;
+
+        if (mode_12_24) begin
+            case ({world_h_ten, world_h_one})
+                8'h00: {disp_h_ten, disp_h_one} = 8'h12;
+                8'h13: {disp_h_ten, disp_h_one} = 8'h01;
+                8'h14: {disp_h_ten, disp_h_one} = 8'h02;
+                8'h15: {disp_h_ten, disp_h_one} = 8'h03;
+                8'h16: {disp_h_ten, disp_h_one} = 8'h04;
+                8'h17: {disp_h_ten, disp_h_one} = 8'h05;
+                8'h18: {disp_h_ten, disp_h_one} = 8'h06;
+                8'h19: {disp_h_ten, disp_h_one} = 8'h07;
+                8'h20: {disp_h_ten, disp_h_one} = 8'h08;
+                8'h21: {disp_h_ten, disp_h_one} = 8'h09;
+                8'h22: {disp_h_ten, disp_h_one} = 8'h10;
+                8'h23: {disp_h_ten, disp_h_one} = 8'h11;
+                default: {disp_h_ten, disp_h_one} = {world_h_ten, world_h_one};
+            endcase
+        end
+    end
+    
+    assign led_pm = (mode_12_24 && disp_is_pm);
+
+    
+    wire sw_run = sw_control[4];
+    wire sw_reset = sw_control[3];
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            sw_m_ten <= 0; sw_m_one <= 0;
+            sw_s_ten <= 0; sw_s_one <= 0;
+            sw_ms_ten <= 0; sw_ms_one <= 0;
+            ms_cnt_10 <= 0;
+        end 
+        
+        else if (sw_stopwatch_mode && !sw_timer_mode && sw_reset) begin
+            sw_m_ten <= 0; sw_m_one <= 0;
+            sw_s_ten <= 0; sw_s_one <= 0;
+            sw_ms_ten <= 0; sw_ms_one <= 0;
+            ms_cnt_10 <= 0;
+        end 
+        else if (sw_run && sw_stopwatch_mode && !sw_timer_mode) begin
+            if (ms_cnt_10 >= 9) begin
+                ms_cnt_10 <= 0;
+                if (sw_ms_one >= 9) begin
+                    sw_ms_one <= 0;
+                    if (sw_ms_ten >= 9) begin
+                        sw_ms_ten <= 0;
+                        if (sw_s_one >= 9) begin
+                            sw_s_one <= 0;
+                            if (sw_s_ten >= 5) begin
+                                sw_s_ten <= 0;
+                                if (sw_m_one >= 9) begin
+                                    sw_m_one <= 0;
+                                    if (sw_m_ten >= 5) sw_m_ten <= 0;
+                                    else sw_m_ten <= sw_m_ten + 1;
+                                end else sw_m_one <= sw_m_one + 1;
+                            end else sw_s_ten <= sw_s_ten + 1;
+                        end else sw_s_one <= sw_s_one + 1;
+                    end else sw_ms_ten <= sw_ms_ten + 1;
+                end else sw_ms_one <= sw_ms_one + 1;
+            end else ms_cnt_10 <= ms_cnt_10 + 1;
+        end
+    end
+
+    
+    wire [4:0] set_min_binary = sw_control; 
+    wire [3:0] set_min_ten = (set_min_binary >= 30) ? 3 : (set_min_binary >= 20) ? 2 : (set_min_binary >= 10) ? 1 : 0;
+    wire [3:0] set_min_one = set_min_binary % 10;
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            tm_m_ten <= 0; tm_m_one <= 0;
+            tm_s_ten <= 0; tm_s_one <= 0;
+            timer_1sec_cnt <= 0;
+            timer_running <= 0;
+            timer_alarm <= 0;
+        end else begin
+            
+            if (sw_timer_mode) begin
+                
+                if (!sw_stopwatch_mode) begin
+                    tm_m_ten <= set_min_ten;
+                    tm_m_one <= set_min_one;
+                    tm_s_ten <= 0;
+                    tm_s_one <= 0;
+                    timer_running <= 0;
+                    timer_alarm <= 0;
+                end 
+                
+                else begin
+                    if (tm_m_ten > 0 || tm_m_one > 0 || tm_s_ten > 0 || tm_s_one > 0) begin 
+                        timer_running <= 1; 
+                        timer_alarm <= 0; 
+                    end 
+                    else if (timer_running) begin 
+                        timer_running <= 0; 
+                        timer_alarm <= 1; 
+                    end
+
+                    if (timer_running) begin
+                        if (timer_1sec_cnt >= 999) begin
+                            timer_1sec_cnt <= 0;
+                            if (tm_s_one == 0) begin
+                                tm_s_one <= 9;
+                                if (tm_s_ten == 0) begin
+                                    tm_s_ten <= 5;
+                                    if (tm_m_one == 0) begin
+                                        tm_m_one <= 9;
+                                        if (tm_m_ten > 0) tm_m_ten <= tm_m_ten - 1;
+                                    end else tm_m_one <= tm_m_one - 1;
+                                end else tm_s_ten <= tm_s_ten - 1;
+                            end else tm_s_one <= tm_s_one - 1;
+                        end else timer_1sec_cnt <= timer_1sec_cnt + 1;
+                    end
+                end
+            end else begin
+                timer_alarm <= 0; 
+            end
+        end
+    end
+
+    
+    reg cuckoo_active;
+    reg [3:0] beeps_left;
+    reg [9:0] cuckoo_timer;
+    reg [4:0] kst_hour_int;
+    reg [3:0] target_beeps;
+    
+    wire hour_tick_trigger = (state == STATE_RUN) && (m_ten==0 && m_one==0 && s_ten==0 && s_one==0 && h_cnt==0);
+    
+    reg [9:0] siren_period;
+    reg siren_dir;
+    
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            piezo <= 0;
+            cuckoo_active <= 0;
+            beeps_left <= 0;
+            cuckoo_timer <= 0;
+            siren_period <= 2;
+            siren_dir <= 0;
+        end else begin
+            
+            if (timer_alarm) begin
+                if (siren_dir == 0) begin
+                    if (siren_period >= 10) siren_dir <= 1;
+                    else siren_period <= siren_period + 1;
+                end else begin
+                    if (siren_period <= 2) siren_dir <= 0;
+                    else siren_period <= siren_period - 1;
+                end
+                
+                if (h_cnt % siren_period < (siren_period/2)) piezo <= 1;
+                else piezo <= 0;
+            end 
+            
+            else begin
+                 if (hour_tick_trigger) begin
+                    cuckoo_active <= 1;
+                    cuckoo_timer <= 0;
+                    kst_hour_int = (h_ten * 10) + h_one;
+                    if (kst_hour_int == 0) target_beeps = 12;
+                    else if (kst_hour_int <= 12) target_beeps = kst_hour_int;
+                    else target_beeps = kst_hour_int - 12;
+                    beeps_left <= target_beeps;
+                end
+
+                if (cuckoo_active) begin
+                    cuckoo_timer <= cuckoo_timer + 1;
+                    if (cuckoo_timer >= 999) begin
+                        cuckoo_timer <= 0;
+                        if (beeps_left > 1) beeps_left <= beeps_left - 1;
+                        else cuckoo_active <= 0;
+                    end
+                    
+                    if (cuckoo_timer < 200) piezo <= ~piezo;
+                    else if (cuckoo_timer >= 300 && cuckoo_timer < 700) begin
+                        if (cuckoo_timer[0] == 0) piezo <= ~piezo;
+                    end else piezo <= 0;
+                end else piezo <= 0;
+            end
+        end
+    end
+
+    
+    always @(posedge clk) begin
+        if (rst) sel_cnt <= 0;
+        else if (sel_cnt >= 5) sel_cnt <= 0;
+        else sel_cnt <= sel_cnt + 1;
+    end
+
+    always @(posedge clk) begin
+        if (rst) seg_com <= 8'b1111_1111;
+        else begin
+            case (sel_cnt)
+                3'd0: seg_com <= 8'b1111_1110;
+                3'd1: seg_com <= 8'b1111_1101;
+                3'd2: seg_com <= 8'b1111_1011;
+                3'd3: seg_com <= 8'b1111_0111;
+                3'd4: seg_com <= 8'b1110_1111;
+                3'd5: seg_com <= 8'b1101_1111;
+                default: seg_com <= 8'b1111_1111;
+            endcase
+        end
+    end
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) blink_cnt <= 0;
+        else if (blink_cnt >= 999) blink_cnt <= 0;
+        else blink_cnt <= blink_cnt + 1;
+    end
+    wire blink_on = (blink_cnt < 500);
+
+    always @(posedge clk) begin
+        if (rst) seg_data <= 8'b0000_0000;
+        
+        else if (sw_timer_mode) begin
+             case (sel_cnt)
+                3'd0: seg_data <= seg_tm_s_one;
+                3'd1: seg_data <= seg_tm_s_ten;
+                3'd2: seg_data <= seg_tm_m_one;
+                3'd3: seg_data <= seg_tm_m_ten;
+                
+                3'd4: seg_data <= 8'b0000_0000; 
+                3'd5: seg_data <= 8'b0000_0000;
+                default: seg_data <= 8'b0000_0000;
+            endcase
+        end 
+        
+        else if (sw_stopwatch_mode) begin
+            case (sel_cnt)
+                3'd0: seg_data <= seg_sw_ms_one;
+                3'd1: seg_data <= seg_sw_ms_ten;
+                3'd2: seg_data <= seg_sw_s_one;
+                3'd3: seg_data <= seg_sw_s_ten;
+                3'd4: seg_data <= seg_sw_m_one;
+                3'd5: seg_data <= seg_sw_m_ten;
+                default: seg_data <= 8'b0000_0000;
+            endcase
+        end 
+        
+        else begin
+            case (sel_cnt)
+                3'd0: seg_data <= seg_s_one;
+                3'd1: seg_data <= seg_s_ten;
+                3'd2: seg_data <= (state == STATE_SET_M && !blink_on) ? 8'b0000_0000 : seg_m_one;
+                3'd3: seg_data <= (state == STATE_SET_M && !blink_on) ? 8'b0000_0000 : seg_m_ten;
+                3'd4: seg_data <= (state == STATE_SET_H && !blink_on) ? 8'b0000_0000 : seg_h_one;
+                3'd5: begin
+                    if (mode_12_24 && disp_h_ten == 0) seg_data <= 8'b0000_0000;
+                    else seg_data <= (state == STATE_SET_H && !blink_on) ? 8'b0000_0000 : seg_h_ten;
+                end
+                default: seg_data <= 8'b0000_0000;
+            endcase
+        end
+    end
+
+    
+    always @(posedge rst, posedge clk) begin
+        if (rst) h_cnt <= 0;
+        else if (state != STATE_RUN) h_cnt <= 0;
+        else if (h_cnt >= 999) h_cnt <= 0;
+        else h_cnt <= h_cnt + 1;
+    end
+    
+    wire sec_tick  = (state == STATE_RUN) && (h_cnt == 999);
+    wire min_tick  = sec_tick && (s_one == 9) && (s_ten == 5);
+    wire hour_tick = min_tick && (m_one == 9) && (m_ten == 5);
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) s_one <= 0;
+        else if (btn_m_posedge && state == STATE_SET_M) s_one <= 0;
+        else if (sec_tick) begin
+            if (s_one >= 9) s_one <= 0;
+            else s_one <= s_one + 1;
+        end
+    end
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) s_ten <= 0;
+        else if (btn_m_posedge && state == STATE_SET_M) s_ten <= 0;
+        else if (sec_tick && s_one == 9) begin
+            if (s_ten >= 5) s_ten <= 0;
+            else s_ten <= s_ten + 1;
+        end
+    end
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) m_one <= 0;
+        else if (min_tick) begin
+            if (m_one >= 9) m_one <= 0;
+            else m_one <= m_one + 1;
+        end else if (btn_i_posedge && state == STATE_SET_M) begin
+            if (m_one >= 9) m_one <= 0;
+            else m_one <= m_one + 1;
+        end
+    end
+    
+    always @(posedge clk or posedge rst) begin
+        if (rst) m_ten <= 0;
+        else if (min_tick && m_one == 9) begin
+            if (m_ten >= 5) m_ten <= 0;
+            else m_ten <= m_ten + 1;
+        end else if (btn_i_posedge && state == STATE_SET_M && m_one == 9) begin
+            if (m_ten >= 5) m_ten <= 0;
+            else m_ten <= m_ten + 1;
+        end
+    end
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) h_one <= 0;
+        else if (hour_tick) begin
+            if (h_ten == 2 && h_one == 3) h_one <= 0;
+            else if (h_one == 9) h_one <= 0;
+            else h_one <= h_one + 1;
+        end else if (btn_i_posedge && state == STATE_SET_H) begin
+            if (h_ten == 2 && h_one == 3) h_one <= 0;
+            else if (h_one == 9) h_one <= 0;
+            else h_one <= h_one + 1;
+        end
+    end
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) h_ten <= 0;
+        else if (hour_tick) begin
+            if (h_ten == 2 && h_one == 3) h_ten <= 0;
+            else if (h_one == 9) h_ten <= h_ten + 1;
+        end else if (btn_i_posedge && state == STATE_SET_H && (h_one == 9 || (h_ten == 2 && h_one == 3))) begin
+             if (h_ten == 2 && h_one == 3) h_ten <= 0;
+            else if (h_one == 9) h_ten <= h_ten + 1;
+        end
+    end
+
+    
+    reg [10:0] total_set_sec; 
+    wire [10:0] current_rem_sec; 
+    assign current_rem_sec = (tm_m_ten * 600) + (tm_m_one * 60) + (tm_s_ten * 10) + tm_s_one;
+
+    always @(posedge clk) begin
+        if (sw_timer_mode && !sw_stopwatch_mode) begin
+            total_set_sec <= (sw_control << 6) - (sw_control << 2); 
+        end
+    end
+
+    reg [3:0] pwm_cnt;
+    always @(posedge clk) begin
+        if (pwm_cnt >= 9) pwm_cnt <= 0;
+        else pwm_cnt <= pwm_cnt + 1;
+    end
+
+    always @(*) begin
+        if (!timer_running && !timer_alarm) begin
+            cled_r = 0; cled_g = 0; cled_b = 0;
+        end else if (timer_alarm) begin
+            cled_r = (pwm_cnt < 5); cled_g = 0; cled_b = 0; 
+        end else begin
+            if (current_rem_sec > (total_set_sec >> 2)) begin
+                cled_r = 0; cled_g = 1; cled_b = 0; 
+            end
+            else if (current_rem_sec > (total_set_sec >> 6)) begin
+                cled_r = (pwm_cnt < 5); cled_g = 1; cled_b = 0; 
+            end
+            else begin
+                cled_r = 1; cled_g = 0; cled_b = 0; 
+            end
+        end
+    end
+
+endmodule
+
+/// lcd제어모델
+
+module lcd_controller(
+    input clk,
+    input rst,
+    input [8:0] btn_world,
+    
+    input sw_timer_mode,      
+    input sw_stopwatch_mode,
+
+    output reg lcd_rs,
+    output reg lcd_rw,
+    output reg lcd_e,
+    output reg [7:0] lcd_data
+);
+
+    parameter INIT_DELAY = 0;
+    parameter INIT_FUNC  = 1;
+    parameter INIT_DISP  = 2;
+    parameter INIT_MODE  = 3;
+    parameter INIT_CLEAR = 4;
+    parameter IDLE       = 5;
+    parameter WRITE_ADDR = 6;
+    parameter WRITE_DATA = 7;
+
+    reg [3:0] state;
+    reg [7:0] char_idx;
+    reg [9:0] wait_cnt;
+    
+    reg [3:0] last_city_idx;
+    reg [3:0] target_city_idx;
+    
+    reg [127:0] disp_str; 
+
+    always @(*) begin
+        if (sw_timer_mode) 
+            disp_str = "TIMER MODE      ";
+        else if (sw_stopwatch_mode) 
+            disp_str = "STOPWATCH       ";
+        else if (btn_world[0]) 
+            disp_str = "London          ";
+        else if (btn_world[1]) 
+            disp_str = "Paris           ";
+        else if (btn_world[2]) 
+            disp_str = "Moscow          ";
+        else if (btn_world[3]) 
+            disp_str = "Bangkok         ";
+        else if (btn_world[4]) 
+            disp_str = "Beijing         ";
+        else if (btn_world[5]) 
+            disp_str = "Sydney          ";
+        else if (btn_world[6]) 
+            disp_str = "New York        ";
+        else if (btn_world[7]) 
+            disp_str = "Los Angeles     ";
+        else if (btn_world[8]) 
+            disp_str = "Hawaii          ";
+        else 
+            disp_str = "SEOUL           ";
+    end
+
+    always @(*) begin
+        if (sw_timer_mode) 
+            target_city_idx = 10;
+        else if (sw_stopwatch_mode) 
+            target_city_idx = 11;
+        else if (btn_world[0]) 
+            target_city_idx = 1;
+        else if (btn_world[1]) 
+            target_city_idx = 2;
+        else if (btn_world[2]) 
+            target_city_idx = 3;
+        else if (btn_world[3]) 
+            target_city_idx = 4;
+        else if (btn_world[4]) 
+            target_city_idx = 5;
+        else if (btn_world[5]) 
+            target_city_idx = 6;
+        else if (btn_world[6]) 
+            target_city_idx = 7;
+        else if (btn_world[7]) 
+            target_city_idx = 8;
+        else if (btn_world[8]) 
+            target_city_idx = 9;
+        else 
+            target_city_idx = 0;
+    end
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            state <= INIT_DELAY;
+            wait_cnt <= 0;
+            lcd_e <= 0;
+            lcd_rs <= 0;
+            lcd_rw <= 0;
+            char_idx <= 0;
+            last_city_idx <= 4'hF;
+        end else begin
+            if (lcd_e) begin
+                lcd_e <= 0; 
+            end else begin
+                case (state)
+                    INIT_DELAY: begin
+                        if (wait_cnt >= 20) begin
+                            state <= INIT_FUNC;
+                            wait_cnt <= 0;
+                        end else begin
+                            wait_cnt <= wait_cnt + 1;
+                        end
+                    end
+                    
+                    INIT_FUNC: begin
+                        lcd_rs <= 0;
+                        lcd_rw <= 0;
+                        lcd_data <= 8'h38;
+                        lcd_e <= 1;
+                        state <= INIT_DISP;
+                    end
+                    
+                    INIT_DISP: begin
+                        lcd_rs <= 0;
+                        lcd_rw <= 0;
+                        lcd_data <= 8'h0C;
+                        lcd_e <= 1;
+                        state <= INIT_MODE;
+                    end
+                    
+                    INIT_MODE: begin
+                        lcd_rs <= 0;
+                        lcd_rw <= 0;
+                        lcd_data <= 8'h06;
+                        lcd_e <= 1;
+                        state <= INIT_CLEAR;
+                    end
+                    
+                    INIT_CLEAR: begin
+                        lcd_rs <= 0;
+                        lcd_rw <= 0;
+                        lcd_data <= 8'h01;
+                        lcd_e <= 1;
+                        state <= IDLE;
+                    end
+                    
+                    IDLE: begin
+                        if (target_city_idx != last_city_idx) begin
+                            last_city_idx <= target_city_idx;
+                            char_idx <= 0;
+                            state <= WRITE_ADDR;
+                        end
+                    end
+                    
+                    WRITE_ADDR: begin
+                        lcd_rs <= 0;
+                        lcd_rw <= 0;
+                        lcd_data <= 8'h80;
+                        lcd_e <= 1;
+                        state <= WRITE_DATA;
+                    end
+                    
+                    WRITE_DATA: begin
+                        if (char_idx < 16) begin
+                            lcd_rs <= 1;
+                            lcd_rw <= 0;
+                            lcd_data <= disp_str[127 - (char_idx * 8) -: 8];
+                            lcd_e <= 1;
+                            char_idx <= char_idx + 1;
+                        end else begin
+                            state <= IDLE;
+                        end
+                    end
+                endcase
+            end
+        end
+    end
+endmodule
+
+
+
+////seg 디코더
+
+module seg_decoder(bcd, seg_data);
+    input [3:0] bcd;
+    output [7:0] seg_data;
+    reg [7:0] seg_data;
+
+    always @(bcd) begin
+        case(bcd)
+            4'H0 : seg_data=8'b1111_1100; 
+            4'H1 : seg_data=8'b0110_0000; 
+            4'H2 : seg_data=8'b1101_1010; 
+            4'H3 : seg_data=8'b1111_0010; 
+            4'H4 : seg_data=8'b0110_0110; 
+            4'H5 : seg_data=8'b1011_0110; 
+            4'H6 : seg_data=8'b1011_1110; 
+            4'H7 : seg_data=8'b1110_0000; 
+            4'H8 : seg_data=8'b1111_1110; 
+            4'H9 : seg_data=8'b1111_0110; 
+            4'Ha : seg_data=8'b1110_1110; 
+            4'Hb : seg_data=8'b0011_1110; 
+            4'Hc : seg_data=8'b1001_1100; 
+            4'Hd : seg_data=8'b0111_1010; 
+            4'He : seg_data=8'b1001_1110; 
+            4'Hf : seg_data=8'b1000_1110; 
+        endcase
+    end
+endmodule
+
+
+
+
+
+
+endmodule
