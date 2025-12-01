@@ -1,0 +1,117 @@
+`timescale 1ms / 100us
+
+module tb_watch;
+
+    reg clk;
+    reg rst;
+
+    reg btn_mode;
+    reg btn_inc;
+    reg [8:0] btn_world;
+
+    reg mode_12_24;
+    reg sw_stopwatch_mode;
+    reg sw_timer_mode;
+    reg [4:0] sw_control;
+
+    wire [7:0] seg_data;
+    wire [7:0] seg_com;
+    wire led_pm;
+    wire piezo;
+
+    wire cled_r;
+    wire cled_g;
+    wire cled_b;
+
+    wire lcd_rs;
+    wire lcd_rw;
+    wire lcd_e;
+    wire [7:0] lcd_data;
+
+    watch uut (
+        .clk(clk),
+        .rst(rst),
+        .btn_mode(btn_mode),
+        .btn_inc(btn_inc),
+        .mode_12_24(mode_12_24),
+        .sw_stopwatch_mode(sw_stopwatch_mode),
+        .sw_timer_mode(sw_timer_mode),
+        .sw_control(sw_control),
+        .btn_world(btn_world),
+        .seg_data(seg_data),
+        .seg_com(seg_com),
+        .led_pm(led_pm),
+        .piezo(piezo),
+        .cled_r(cled_r),
+        .cled_g(cled_g),
+        .cled_b(cled_b),
+        .lcd_rs(lcd_rs),
+        .lcd_rw(lcd_rw),
+        .lcd_e(lcd_e),
+        .lcd_data(lcd_data)
+    );
+
+    always #0.5 clk = ~clk;
+
+    initial begin
+        clk = 0;
+        rst = 1;
+        btn_mode = 0; btn_inc = 0; btn_world = 0;
+        mode_12_24 = 0;
+        sw_stopwatch_mode = 0;
+        sw_timer_mode = 0;
+        sw_control = 0;
+
+        #10;
+        rst = 0;
+        $display("=== [0s] System Reset Released. Clock Started. ===");
+
+        #3000;
+
+        $display("=== [3s] World Time Test: Press London Button (-9h) ===");
+        btn_world[0] = 1;
+        #1000;
+        btn_world[0] = 0;
+        #500;
+
+        $display("=== [4.5s] Stopwatch Test Start ===");
+
+        sw_stopwatch_mode = 1;
+        #500;
+
+        sw_control = 5'b10000;
+        $display("   -> Stopwatch Running...");
+        #2000;
+
+        sw_control = 5'b00000;
+        $display("   -> Stopwatch Stopped.");
+        #500;
+
+        sw_control = 5'b01000;
+        #100;
+        sw_control = 5'b00000;
+        $display("   -> Stopwatch Reset.");
+        #400;
+
+        sw_stopwatch_mode = 0;
+        #500;
+
+        $display("=== [8s] Smart Timer Test Start ===");
+
+        sw_timer_mode = 1;
+        #500;
+
+        sw_control = 5'b00001;
+        $display("   -> Set Timer to 1 Min (01:00)");
+        #500;
+
+        sw_stopwatch_mode = 1;
+        $display("   -> Timer Count Down Started!");
+
+        #2000;
+
+        $display("=== [11s] All Simulation Scenarios Completed. ===");
+        $stop;
+    end
+
+endmodule
